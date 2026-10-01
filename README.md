@@ -156,12 +156,6 @@ If changes conflict (for example, the same data changed from another browser tab
 
 **Validation:** values are trimmed, must not be empty, and are at most 200 characters long. This is checked in the UI, in the API, and by a database constraint (non-empty).
 
-## Possible improvements
-
-- Paging for nodes with a very large number of children.
-- Optimistic concurrency, such as a row version per node, to detect edits based on stale values.
-- API integration tests against a real PostgreSQL instance (for example with Testcontainers).
-
 ## Project structure
 
 ```
