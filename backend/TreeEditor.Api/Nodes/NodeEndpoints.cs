@@ -23,7 +23,8 @@ public static class NodeEndpoints
         {
             try
             {
-                return Results.Ok(await service.ApplyAsync(request, ct));
+                var result = await service.ApplyAsync(request, ct);
+                return Results.Ok(result);
             }
             catch (ApplyValidationException ex)
             {

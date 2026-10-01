@@ -3,12 +3,6 @@ using Npgsql;
 
 namespace TreeEditor.Api.Nodes;
 
-/// <summary>
-/// Applies the pending changes of the client cache in one transaction.
-/// Order: inserts (parents before children), then value updates, then subtree deletes.
-/// Conflict rule: deletion wins. New nodes under a deleted parent are skipped,
-/// and value updates of deleted nodes are ignored.
-/// </summary>
 public sealed class ApplyService(NpgsqlDataSource dataSource)
 {
     public const int MaxValueLength = 200;
@@ -21,6 +15,7 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
         var updated = request.Updated ?? [];
         var deleted = (request.Deleted ?? []).Distinct().ToList();
         var cachedIds = (request.CachedIds ?? []).Distinct().ToList();
+
         Validate(added, updated, deleted, cachedIds);
 
         await using var connection = await dataSource.OpenConnectionAsync(ct);
@@ -36,7 +31,11 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
         var updatedCount = await UpdateAsync(connection, tx, updated, ct);
         var deletedCount = await DeleteAsync(connection, tx, deleted, ct);
 
-        var refreshIds = cachedIds.Concat(idMap.Select(m => m.Id)).Distinct().ToList();
+        var refreshIds = cachedIds
+            .Concat(idMap.Select(m => m.Id))
+            .Distinct()
+            .ToList();
+
         var nodes = await NodeQueries.GetManyAsync(connection, tx, refreshIds, ct);
 
         await tx.CommitAsync(ct);
@@ -44,28 +43,34 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
     }
 
     private static void Validate(
-        IReadOnlyList<AddedNode> added, IReadOnlyList<UpdatedNode> updated,
-        IReadOnlyList<long> deleted, IReadOnlyList<long> cachedIds)
+        IReadOnlyList<AddedNode> added,
+        IReadOnlyList<UpdatedNode> updated,
+        IReadOnlyList<long> deleted,
+        IReadOnlyList<long> cachedIds)
     {
         foreach (var value in added.Select(a => a.Value).Concat(updated.Select(u => u.Value)))
         {
             if (string.IsNullOrWhiteSpace(value))
                 throw new ApplyValidationException("Value must not be empty.");
+
             if (value.Trim().Length > MaxValueLength)
                 throw new ApplyValidationException($"Value must not be longer than {MaxValueLength} characters.");
         }
 
         if (added.Any(a => a.TempId >= 0))
             throw new ApplyValidationException("Temporary ids of new nodes must be negative.");
+
         if (added.Select(a => a.TempId).Distinct().Count() != added.Count)
             throw new ApplyValidationException("Temporary ids of new nodes must be unique.");
 
         var tempIds = added.Select(a => a.TempId).ToHashSet();
+
         if (added.Any(a => a.ParentId == 0 || (a.ParentId < 0 && !tempIds.Contains(a.ParentId))))
             throw new ApplyValidationException("A new node references an unknown parent.");
 
         if (updated.Any(u => u.Id <= 0) || deleted.Any(id => id <= 0) || cachedIds.Any(id => id <= 0))
             throw new ApplyValidationException("Updated, deleted and cached ids must be database ids.");
+
         if (updated.Select(u => u.Id).Distinct().Count() != updated.Count)
             throw new ApplyValidationException("A node can be updated only once per request.");
     }
@@ -75,11 +80,22 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
     {
         var idMap = new List<IdMapping>();
         var skipped = new List<long>();
+
         if (added.Count == 0) return (idMap, skipped);
 
         // Parents of new nodes: existing database nodes, and new nodes once they are inserted.
-        var parents = await LoadParentsAsync(connection, tx,
-            added.Where(a => a.ParentId > 0).Select(a => a.ParentId).Distinct().ToArray(), ct);
+        var parentIds = added
+            .Where(a => a.ParentId > 0)
+            .Select(a => a.ParentId)
+            .Distinct()
+            .ToArray();
+
+        var parents = await LoadParentsAsync(
+            connection,
+            tx,
+            parentIds,
+            ct);
+
         var insertedByTempId = new Dictionary<long, (long Id, ParentInfo Info)>();
 
         const string insertSql = """
@@ -93,6 +109,7 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
         {
             long parentId;
             ParentInfo? parent;
+
             if (node.ParentId > 0)
             {
                 parentId = node.ParentId;
@@ -117,6 +134,7 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
             }
 
             await using var insert = new NpgsqlCommand(insertSql, connection, tx);
+
             insert.Parameters.AddWithValue("parentId", parentId);
             insert.Parameters.AddWithValue("value", node.Value.Trim());
             insert.Parameters.AddWithValue("parentPath", parent.Path);
@@ -124,6 +142,7 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
 
             await using var reader = await insert.ExecuteReaderAsync(ct);
             await reader.ReadAsync(ct);
+
             var id = reader.GetInt64(0);
             var path = reader.GetString(1);
 
@@ -134,7 +153,6 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
         return (idMap, skipped);
     }
 
-    /// <summary>Orders new nodes so that every new parent comes before its new children.</summary>
     private static List<AddedNode> TopologicalOrder(IReadOnlyList<AddedNode> added)
     {
         var childrenByParent = added.ToLookup(a => a.ParentId);
@@ -145,11 +163,16 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
         {
             var node = queue.Dequeue();
             ordered.Add(node);
-            foreach (var child in childrenByParent[node.TempId]) queue.Enqueue(child);
+
+            foreach (var child in childrenByParent[node.TempId])
+            {
+                queue.Enqueue(child);
+            }
         }
 
         if (ordered.Count != added.Count)
             throw new ApplyValidationException("New nodes contain a cycle.");
+
         return ordered;
     }
 
@@ -161,11 +184,16 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
 
         await using var command = new NpgsqlCommand(
             "SELECT id, path, depth, is_deleted FROM tree_nodes WHERE id = ANY(@ids)", connection, tx);
+
         command.Parameters.AddWithValue("ids", ids);
+
         await using var reader = await command.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            result[reader.GetInt64(0)] = new ParentInfo(reader.GetString(1), reader.GetInt32(2), reader.GetBoolean(3));
+            result[reader.GetInt64(0)] = new ParentInfo(
+                Path: reader.GetString(1),
+                Depth: reader.GetInt32(2), 
+                IsDeleted: reader.GetBoolean(3));
         }
 
         return result;
@@ -182,9 +210,12 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
             FROM unnest(@ids, @values) AS u(id, value)
             WHERE t.id = u.id AND NOT t.is_deleted AND t.value <> u.value
             """;
+
         await using var command = new NpgsqlCommand(sql, connection, tx);
+
         command.Parameters.AddWithValue("ids", updated.Select(u => u.Id).ToArray());
         command.Parameters.AddWithValue("values", updated.Select(u => u.Value.Trim()).ToArray());
+
         return await command.ExecuteNonQueryAsync(ct);
     }
 
@@ -194,10 +225,10 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
         if (deleted.Count == 0) return 0;
 
         var paths = new List<string>();
-        await using (var select = new NpgsqlCommand(
-                         "SELECT path FROM tree_nodes WHERE id = ANY(@ids)", connection, tx))
+        await using (var select = new NpgsqlCommand("SELECT path FROM tree_nodes WHERE id = ANY(@ids)", connection, tx))
         {
             select.Parameters.AddWithValue("ids", deleted.ToArray());
+
             await using var reader = await select.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct)) paths.Add(reader.GetString(0));
         }
@@ -211,6 +242,7 @@ public sealed class ApplyService(NpgsqlDataSource dataSource)
             await using var update = new NpgsqlCommand(
                 "UPDATE tree_nodes SET is_deleted = TRUE, updated_at = now() WHERE path LIKE @prefix AND NOT is_deleted",
                 connection, tx);
+
             update.Parameters.AddWithValue("prefix", path + "%");
             total += await update.ExecuteNonQueryAsync(ct);
         }

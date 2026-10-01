@@ -21,7 +21,6 @@ public sealed record NodeDto(
 /// <param name="Value">Node value.</param>
 public sealed record AddedNode(long TempId, long ParentId, string Value);
 
-/// <summary>A changed value of an existing node.</summary>
 public sealed record UpdatedNode(long Id, string Value);
 
 /// <summary>All pending changes of the client cache, applied in a single transaction.</summary>
@@ -35,7 +34,6 @@ public sealed record ApplyRequest(
     IReadOnlyList<long>? Deleted,
     IReadOnlyList<long>? CachedIds);
 
-/// <summary>Maps a client temporary id to the id assigned by the database.</summary>
 public sealed record IdMapping(long TempId, long Id);
 
 /// <summary>Result of applying cache changes.</summary>
@@ -53,5 +51,4 @@ public sealed record ApplyResponse(
     int UpdatedCount,
     int DeletedCount);
 
-/// <summary>Thrown when an apply request is malformed.</summary>
 public sealed class ApplyValidationException(string message) : Exception(message);

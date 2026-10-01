@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Reflection;
 using Npgsql;
 
@@ -20,6 +21,7 @@ public sealed class DatabaseInitializer(NpgsqlDataSource dataSource, ILogger<Dat
         }
 
         await using var count = new NpgsqlCommand("SELECT EXISTS (SELECT 1 FROM tree_nodes)", connection);
+
         var hasData = (bool)(await count.ExecuteScalarAsync(ct))!;
         if (!hasData)
         {
@@ -48,6 +50,7 @@ public sealed class DatabaseInitializer(NpgsqlDataSource dataSource, ILogger<Dat
 
             SELECT setval(pg_get_serial_sequence('tree_nodes', 'id'), (SELECT max(id) FROM tree_nodes));
             """;
+
         await using (var insert = new NpgsqlCommand(insertSql, connection, tx))
         {
             insert.Parameters.AddWithValue("ids", rows.Select(r => r.Id).ToArray());
@@ -69,6 +72,13 @@ public sealed class DatabaseInitializer(NpgsqlDataSource dataSource, ILogger<Dat
         var rows = new List<SeedRow>();
         long nextId = 1;
 
+        foreach (var root in roots)
+        {
+            Visit(root, null);
+        }
+
+        return rows;
+
         void Visit(SeedNode node, SeedRow? parent)
         {
             var id = nextId++;
@@ -78,12 +88,14 @@ public sealed class DatabaseInitializer(NpgsqlDataSource dataSource, ILogger<Dat
                 node.Value,
                 (parent?.Path ?? "/") + id + "/",
                 (parent?.Depth ?? -1) + 1);
-            rows.Add(row);
-            foreach (var child in node.Children) Visit(child, row);
-        }
 
-        foreach (var root in roots) Visit(root, null);
-        return rows;
+            rows.Add(row);
+
+            foreach (var child in node.Children)
+            {
+                Visit(child, row);
+            }
+        }
     }
 
     private async Task WaitForDatabaseAsync(CancellationToken ct)
@@ -95,7 +107,7 @@ public sealed class DatabaseInitializer(NpgsqlDataSource dataSource, ILogger<Dat
                 await using var connection = await dataSource.OpenConnectionAsync(ct);
                 return;
             }
-            catch (Exception ex) when (ex is NpgsqlException or System.Net.Sockets.SocketException && attempt < MaxConnectAttempts)
+            catch (Exception ex) when (ex is NpgsqlException or SocketException && attempt < MaxConnectAttempts)
             {
                 logger.LogWarning("Database is not available yet (attempt {Attempt}): {Message}", attempt, ex.Message);
                 await Task.Delay(TimeSpan.FromSeconds(2), ct);
@@ -107,8 +119,10 @@ public sealed class DatabaseInitializer(NpgsqlDataSource dataSource, ILogger<Dat
     {
         var assembly = Assembly.GetExecutingAssembly();
         var name = assembly.GetManifestResourceNames().Single(n => n.EndsWith("Schema.sql", StringComparison.Ordinal));
+        
         using var stream = assembly.GetManifestResourceStream(name)!;
         using var reader = new StreamReader(stream);
+        
         return reader.ReadToEnd();
     }
 }

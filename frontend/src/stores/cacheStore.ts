@@ -50,6 +50,7 @@ export const useCacheStore = defineStore('cache', () => {
   /** A node is deleted if it, or any of its ancestors, is deleted (in the DB or pending). */
   function isDeleted(node: CacheNode): boolean {
     if (node.deletedInDb || node.pendingDelete) return true
+    
     const pending = pendingDeleteIds.value
     return node.ancestorIds.some((id) => pending.has(id))
   }
@@ -75,6 +76,7 @@ export const useCacheStore = defineStore('cache', () => {
    */
   const tree = computed<CachedTreeItem[]>(() => {
     const items = new Map<number, CachedTreeItem>()
+
     for (const node of nodes.value.values()) {
       items.set(node.id, {
         key: String(node.id),
@@ -92,11 +94,14 @@ export const useCacheStore = defineStore('cache', () => {
     }
 
     const roots: CachedTreeItem[] = []
+
     for (const node of nodes.value.values()) {
       const item = items.get(node.id)!
       let parent: CachedTreeItem | undefined
+
       for (let i = node.ancestorIds.length - 1; i >= 0; i--) {
         parent = items.get(node.ancestorIds[i]!)
+
         if (parent) {
           item.data.hiddenLevels = node.ancestorIds.length - 1 - i
           break
@@ -124,8 +129,10 @@ export const useCacheStore = defineStore('cache', () => {
     let added = 0
     let updated = 0
     let deleted = 0
+
     for (const node of nodes.value.values()) {
       const deletedNow = isDeleted(node)
+
       if (isNew(node)) {
         if (!deletedNow) added++
       } else if (node.pendingDelete && !node.deletedInDb) {
@@ -134,6 +141,7 @@ export const useCacheStore = defineStore('cache', () => {
         updated++
       }
     }
+
     return { added, updated, deleted, total: added + updated + deleted }
   })
 
@@ -142,6 +150,7 @@ export const useCacheStore = defineStore('cache', () => {
   /** Puts an element loaded from the database into the cache. */
   function addLoaded(dto: NodeDto): AddResult {
     if (nodes.value.has(dto.id)) return 'exists'
+
     nodes.value.set(dto.id, {
       id: dto.id,
       parentId: dto.parentId,
@@ -164,8 +173,10 @@ export const useCacheStore = defineStore('cache', () => {
 
   function requireEditable(id: number): CacheNode {
     const node = nodes.value.get(id)
+
     if (!node) throw new Error(`Node ${id} is not in the cache.`)
     if (isDeleted(node)) throw new Error('Deleted elements cannot be changed.')
+
     return node
   }
 
@@ -178,6 +189,7 @@ export const useCacheStore = defineStore('cache', () => {
   function addChild(parentId: number, value: string): number {
     const parent = requireEditable(parentId)
     const id = nextTempId--
+
     nodes.value.set(id, {
       id,
       parentId,
@@ -187,6 +199,7 @@ export const useCacheStore = defineStore('cache', () => {
       deletedInDb: false,
       pendingDelete: false,
     })
+
     return id
   }
 
@@ -284,8 +297,10 @@ export const MAX_VALUE_LENGTH = 200
 
 function normalizeValue(value: string): string {
   const trimmed = value.trim()
+
   if (!trimmed) throw new Error('Value must not be empty.')
   if (trimmed.length > MAX_VALUE_LENGTH) throw new Error(`Value must not be longer than ${MAX_VALUE_LENGTH} characters.`)
+
   return trimmed
 }
 
@@ -293,7 +308,9 @@ function normalizeValue(value: string): string {
 function compareItems(a: CachedTreeItem, b: CachedTreeItem): number {
   const x = a.data.id
   const y = b.data.id
+
   if (x > 0 && y > 0) return x - y
   if (x < 0 && y < 0) return y - x
+
   return x > 0 ? -1 : 1
 }

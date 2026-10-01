@@ -43,6 +43,7 @@ async function onExpand(node: TreeNode) {
 /** Loads the selected element from the database into the cache. */
 async function loadIntoCache(id = db.selectedId) {
   if (id === null) return
+  
   if (cache.has(id)) {
     cache.select(id)
     toast.add({ severity: 'info', summary: 'Already cached', detail: 'This element is already in the cache.', life: 2500 })
