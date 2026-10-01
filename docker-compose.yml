@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: treeeditor
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      # Since PostgreSQL 18 the image keeps its data under /var/lib/postgresql/<version>.
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d treeeditor"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  api:
+    build: ./backend
+    environment:
+      ConnectionStrings__TreeEditor: "Host=db;Port=5432;Database=treeeditor;Username=postgres;Password=postgres"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "5080:8080"
+
+  ui:
+    build: ./frontend
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  db-data:

@@ -1,0 +1,42 @@
+/* Bootstrap and PrimeVue live in separate cascade layers; PrimeVue wins inside its components. */
+@layer bootstrap, primevue;
+@import 'bootstrap/dist/css/bootstrap.min.css' layer(bootstrap);
+
+body {
+  background: #f4f6f8;
+}
+
+.tree-scroll {
+  min-height: 22rem;
+  max-height: calc(100vh - 16rem);
+  overflow: auto;
+}
+
+.node-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+.node-id {
+  font-size: 0.75em;
+  color: var(--bs-secondary-color);
+}
+
+.node-deleted {
+  color: var(--bs-secondary-color);
+}
+
+.node-deleted .node-text {
+  text-decoration: line-through;
+}
+
+.hidden-levels {
+  color: var(--bs-secondary-color);
+  border: 1px dashed var(--bs-border-color);
+  border-radius: 0.25rem;
+  padding: 0 0.25rem;
+  line-height: 1.1;
+  cursor: help;
+}
